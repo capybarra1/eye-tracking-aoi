@@ -1,0 +1,9 @@
+outputs/
+videos/
+.venv/
+__pycache__/
+*.pyc
+.env
+*.csv
+*.aoi.json
+*.sqlite3*

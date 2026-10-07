@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AOI · 切片标注</title>
+<style>
+:root{color-scheme:dark;--bg:#111715;--text:#e4ece6;--muted:#a2b4a7;--line:#35483c;--green:#a2e370;--cyan:#68dbea;--amber:#ffca79}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 "PingFang SC","Microsoft YaHei",sans-serif}main{max-width:1200px;margin:auto;padding:20px}header{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:16px}h1{margin:0;font-size:20px;font-weight:600}select,button{font:inherit;color:var(--text);background:#26372b;border:1px solid #526b58;border-radius:6px;padding:9px 13px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button:hover:enabled{border-color:var(--green)}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--cyan);outline-offset:2px}#toggle{background:var(--green);color:#132010;border-color:var(--green);font-weight:650;min-width:132px}#toggle.running{background:#352d20;color:var(--amber);border-color:var(--amber)}.meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:13px;margin:8px 0}#clock{font-variant-numeric:tabular-nums;color:var(--text)}canvas{display:block;width:min(100%,calc((100dvh - 260px)*1.777778));min-width:min(100%,360px);margin:0 auto;height:auto;background:#030705;touch-action:none;border:1px solid var(--line);border-radius:5px}#timeline{height:8px;background:#334039;position:relative;overflow:hidden;margin-top:14px;border-radius:3px}#timeline span{height:100%;position:absolute}#seek{width:100%;accent-color:var(--green);margin:8px 0}nav{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:5px}#speed{display:flex;gap:6px;flex-wrap:wrap}#speed button{padding:8px 11px;white-space:nowrap}#speed button[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#132010;font-weight:650}.hint{color:var(--muted);font-size:13px;margin:12px 0 0}#reason{color:var(--amber);min-height:24px;margin:12px 0 0;font-size:14px}#feedback{color:var(--amber);overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px}.visibility{display:flex;gap:20px;color:var(--muted);font-size:13px;margin-top:12px}.visibility label{cursor:pointer}.visibility input{accent-color:var(--green)}#status{color:var(--muted);font-size:13px}#export{background:transparent}.screen{color:var(--green)}.tablet{color:var(--cyan)}@media(max-width:600px){main{padding:14px}h1{font-size:18px}select{max-width:200px}.meta{font-size:12px}.hint{line-height:1.8}}
+body.issue-alert #canvas{border-color:#ff6868;box-shadow:0 0 0 3px #ff686855}body.issue-alert #status{color:#ff9a9a;background:#572626;border:1px solid #ff6868;border-radius:6px;padding:5px 10px;font-weight:650}body.issue-alert #reason{color:#ffd0d0;background:#442121;border-left:4px solid #ff6868;border-radius:4px;padding:10px 12px;font-weight:600}
+
+#timeline span{cursor:pointer}#timeline span:focus{outline:2px solid white;outline-offset:-2px}.subject-row{border-top:1px solid #35483c;padding:12px 0}.subject-row h3{margin:0 0 5px;font-size:16px}.recording-label{display:flex;align-items:center;justify-content:space-between;gap:8px}.recording-label button{background:transparent;border:0;padding:4px 0;text-align:left}.recording-track{display:flex;height:24px;gap:2px;margin:5px 0 8px}.segment-track{position:relative;min-width:12px;height:24px;padding:0;background:#334039;border:0;overflow:hidden;border-radius:3px}.segment-track span{position:absolute;top:0;height:100%;pointer-events:none}.segment-track b{position:relative;font-size:11px;color:white;text-shadow:0 1px 3px black;pointer-events:none}.progress-count{font-size:12px;color:#a2b4a7}.progress-count .red{color:#ff9393}.progress-count .yellow{color:#e6bc5d}
+.subject-track{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;margin:6px 0}.subject-slot{min-width:0}.segment-name{display:block;text-align:center;font-size:11px;color:#a2b4a7;margin-bottom:3px}.segment-parts{display:flex;height:24px;gap:1px}.segment-parts .segment-track{min-width:1px;border-radius:2px}.missing-segment{border:1px dashed #64796b;border-radius:2px;background:repeating-linear-gradient(135deg,#26342d 0px,#26342d 5px,#617266 5px,#617266 7px)}@media(max-width:550px){.subject-track{grid-template-columns:repeat(6,minmax(0,1fr))}}
+</style></head><body><main>
+<header><h1>切片标注</h1><button id="openProject" disabled>被试目录</button><select id="slice" aria-label="选择切片"></select></header>
+<nav style="justify-content:flex-start;margin-bottom:12px"><button id="batchStart" disabled title="失跟自动回退重试，成功后继续切片和下一被试；两次仍失败才报警">自动标注</button><button id="batchSkip" disabled title="保留已有标注，跳过这份录像的剩余切片，继续下一份">跳过当前录像</button><span id="batchStatus" class="hint"></span></nav>
+<details id="skippedPanel" hidden><summary id="skippedTitle">已跳过</summary><ul id="skippedList"></ul></details>
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0"><span id="smartRecovery" class="hint" style="margin:0" hidden></span><button id="preprocessToggle" type="button" hidden>暂停预处理</button></div>
+
+<div class="meta"><span id="subject">正在读取…</span><span id="clock"></span><button id="editTiming" disabled style="padding:3px 10px">调整切片范围</button></div>
+<section id="timingPanel" hidden style="border:1px solid #526b58;border-radius:8px;padding:14px;margin:12px 0;background:#17231b">
+<strong id="timingTitle">调整切片范围</strong><p class="hint">拖动下方滑动条预览整份录像，再设开始和结束。前后逐帧可微调；结束帧也会保留。</p>
+<img id="timingImage" alt="切片边界预览" style="display:block;width:min(100%,560px);height:auto;min-height:100px;margin:10px auto"><p id="timingClock" style="text-align:center"></p>
+<div id="timingBand" style="height:6px;border-radius:3px"></div><input id="timingSeek" type="range" min="0" max="1" step="1" value="0" aria-label="切片范围预览滑动条" style="width:100%;accent-color:#a2e370">
+<div style="display:flex;flex-wrap:wrap;gap:8px"><button id="timingPrev">前一帧</button><button id="timingNext">后一帧</button><button id="timingSetStart">设为开始</button><button id="timingSetEnd">设为结束</button></div>
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button id="timingStart" title="预览开始帧"></button><button id="timingEnd" title="预览结束帧"></button></div><p id="timingMessage" class="hint" role="status"></p>
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button id="timingSave">保存范围</button><button id="timingCancel">取消</button><button id="timingOriginal">恢复原范围</button></div>
+<p class="hint">移出范围的标注仍留在本地，调回后可恢复；新增部分待标注。只修改当前录像的当前切片。</p></section>
+<details id="imagePanel" style="margin:10px 0;padding:8px 12px;border:1px solid #35483c;border-radius:6px"><summary style="cursor:pointer">画面增强 · 亮度 / 对比度</summary>
+<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:10px 0">
+<label>亮度 <input id="imageBrightness" aria-label="画面亮度" type="range" min="-50" max="100" value="0" step="5" disabled> <output id="imageBrightnessValue">0</output></label>
+<label>对比度 <input id="imageContrast" aria-label="画面对比度" type="range" min="50" max="200" value="100" step="5" disabled> <output id="imageContrastValue">100%</output></label>
+<button id="imageDefault" disabled>恢复默认</button></div><p class="hint" id="imageNote">暂停后调节，自动保存当前录像的设置。</p></details>
+<canvas id="canvas" width="960" height="540" aria-label="视频标注：绿色四个点为屏幕下边缘，青色四个点为平板"></canvas>
+<div id="timeline" aria-label="已处理与异常范围"></div><p class="hint" style="margin:4px 0">绿：已标注 · 红：异常 · 黄：起点待确认 · 灰：未标注；点击红／黄色段定位</p><input id="seek" type="range" min="0" max="1" value="0" aria-label="拖动进度条回看">
+<nav><button id="toggle" disabled>开始</button><button id="reset" disabled title="备份并清除本切片从当前帧起的旧标注，使用当前轮廓重新计算">从这里重标</button><div id="speed" role="group" aria-label="播放速度"><button type="button" data-speed="1" aria-pressed="true">1×</button><button type="button" data-speed="1.5" aria-pressed="false">1.5×</button><button type="button" data-speed="2" aria-pressed="false">2×</button><button type="button" data-speed="3" aria-pressed="false">3×</button><button type="button" data-speed="5" aria-pressed="false">5× 预览检查</button></div><span id="status" role="status" aria-live="polite">正在连接</span><button id="export" disabled>保存标注</button></nav>
+<div id="keyframeTools" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button id="reviewHead" disabled>设首帧</button><button id="reviewTail" disabled>设尾帧并补齐</button><button id="reviewPlay" hidden>预览这段</button><button id="reviewSave" hidden>保存这段</button><button id="reviewClose" hidden>取消关键帧</button><span id="reviewStatus" class="hint" style="margin:0"></span></div>
+<p id="reason" aria-live="polite"></p><p id="feedback" role="alert"></p><p id="saveStatus" role="status" aria-live="polite" class="hint">尚未生成标注存档</p>
+<details id="savedFiles" hidden><summary>已保存的文件</summary><p id="saveFolder" class="hint" style="overflow-wrap:anywhere"></p><p><a id="reviewDownload" href="/api/annotations/archive" download>下载标注存档</a> · <a id="tableDownload" href="/api/annotations/table" download>下载数据表</a></p><p class="hint">文件已自动保存到本地，无需再次下载。标注存档可重新导入，数据表是逐帧 AOI 坐标，不是眼动指标。</p></details>
+<p id="manualHint" class="hint">暂停后：拖点改形状，拖区域内部整体移动，可移出画面。<span class="screen">屏幕左右端点保持贴边</span> · <span class="tablet">屏幕避开平板区域 · 平板出画暂时隐藏</span><br>松手、暂停和切片结束自动保存标注存档＋数据表。回拖后点「从这里重标」，会备份并清除本切片后面的旧标注，再从当前轮廓继续。空格开始 / 暂停，方向键逐帧回看。</p>
+<div class="visibility"><label><input id="horizontalMode" type="checkbox">一条线极简分区</label><label><input id="screenVisible" type="checkbox" checked>屏幕可见</label><label><input id="tabletVisible" type="checkbox" checked>平板可见</label></div>
+</main>
+<dialog id="projectDialog" style="width:min(800px,95vw);max-height:90vh;overflow:auto;background:#17231b;color:#e4ece6;border:1px solid #526b58;border-radius:10px">
+<form method="dialog" style="float:right"><button>关闭</button></form><h2>被试目录</h2><p class="hint">蓝：旧软件已标注 · 绿：本工具已生成标注 · 红：跟踪异常 · 黄：起点待确认 · 灰：未标注 · 斜纹：缺失录像或切片时间。点击任意位置回看；需要修改时在主画面设置首尾关键帧。同一被试的视频已合并显示，缺失切片用斜纹表示；进度仅统计本工具已知切片。</p><div id="subjectDirectory" aria-label="所有被试标注进度">正在读取…</div><details id="projectTools"><summary>添加视频／导入存档／计算指标</summary>
+<p id="projectCurrent"></p>
+<p><label>已有项目 <select id="savedProject"></select></label> <button id="loadProject">打开</button></p>
+<details id="addVideoDetails"><summary>选择被试／添加视频</summary>
+<p>视频留在本机。只纳入绿色被试，每份录像使用自己的切片时间和标注进度。</p>
+<p><label>被试与录像段 <select id="indexedVideo"><option value="">选择本机视频</option></select></label></p>
+<p id="importNotes" role="status" style="color:#ffca79;white-space:pre-wrap"></p>
+<p><label>被试 <select id="newSubject"></select></label></p>
+<p><label>视频完整路径 <input id="videoPath" style="width:100%" placeholder="/path/to/scenevideo.mp4"></label></p>
+<p>可在访达复制文件路径后粘贴。也可以导入已有切片清单：</p><input id="manifestFile" type="file" accept=".json,.csv">
+<p>起止时间填“分:秒”或秒数，例如 02:49.049。首次打开新视频需要建立时间索引，请等待完成。</p>
+<p><label><input id="splitRecording" type="checkbox">本项目只有部分切片：其余留空（分录像或补充片段）</label></p>
+<table><thead><tr><th>切片</th><th>开始</th><th>结束</th></tr></thead><tbody id="sliceInputs"></tbody></table>
+<details><summary>查看该被试的原切片时间记录</summary><div id="timingImages"></div></details>
+<p><button id="createProject">保存并打开视频</button></p>
+</details>
+<hr><details><summary>导入标注存档</summary><p>选择被试对应的 .aoi.json 标注存档（兼容旧 review.aoi.json）。导入后创建独立副本供检查和修改；CSV 数据表不能重新导入轮廓。</p>
+<input id="reviewFile" type="file" accept=".json">
+<p><label>视频换位置时填写新路径（否则留空）<input id="reviewVideo" style="width:100%"></label></p>
+<button id="importReview">导入并复核</button></details>
+<hr><p><button id="runAnalysis">计算当前被试指标</button> <span id="analysisStatus"></span></p><p><a id="analysisDownload" href="/api/analysis/download" download hidden>下载切片指标 CSV</a></p>
+<p style="font-size:13px">指标来自已保存AOI和同目录 gazedata.gz；未标注的片段留空。当前为明示参数的 I-VT 试算，不代表已复现 Ergolab 参数。</p>
+<p id="projectMessage" role="alert" style="color:#ffca79;white-space:pre-wrap"></p>
+</details></dialog>
+<script src="/aoi_drag.js"></script><script src="/aoi_scrub.js"></script><script>
+'use strict';
+const $=id=>document.getElementById(id),canvas=$('canvas'),ctx=canvas.getContext('2d');
+let state=null,points=null,tablet=null,visible=null,img=null,dirty=false,screenDirty=false,busy=false,want=false,epoch=0,drag=null,serial=Promise.resolve(),pausing=false;
+let paintPending=0,imageSource=null,sliceMarkup=null,timelineMarkup=null,savePollTimer=null,savePollBusy=false;
+let playbackSpeed=1;
+let partition=null;
+let scrubContext=null,scrubPreview=null;
+let reviewUI=null;
+function progressColor(status){return status==='issue'?'#ed7777':status==='unverified'?'#d8af56':'#86b66b'}
+let alertAudio=null;
+function unlockAlertAudio(){
+ try{
+  const Audio=window.AudioContext||window.webkitAudioContext;
+  if(!Audio)return;
+  if(!alertAudio||alertAudio.state==='closed')alertAudio=new Audio();
+  if(alertAudio.state==='suspended')alertAudio.resume().catch(()=>{});
+ }catch(_){} // A blocked audio device must never interrupt annotation.
+}
+function playPauseAlert(){
+ try{
+  if(!alertAudio||alertAudio.state!=='running')return;
+  const tone=alertAudio.createOscillator(),volume=alertAudio.createGain(),t=alertAudio.currentTime;
+  tone.type='sine';tone.frequency.setValueAtTime(880,t);
+  volume.gain.setValueAtTime(0,t);volume.gain.linearRampToValueAtTime(.18,t+.015);
+  volume.gain.setValueAtTime(.18,t+.22);volume.gain.linearRampToValueAtTime(0,t+.35);
+  tone.connect(volume);volume.connect(alertAudio.destination);
+  tone.onended=()=>{tone.disconnect();volume.disconnect()};tone.start(t);tone.stop(t+.36);
+ }catch(_){}
+}
+function showPauseAlert(previous,s,automatic){
+ const issue=(s.mode==='issue'&&s.annotation_status!=='unverified'&&!s.running&&!s.batch?.active)||!!s.batch?.needs_attention;
+ document.body.classList.toggle('issue-alert',issue);
+ document.title=issue?'异常暂停 · AOI 切片标注':'AOI · 切片标注';
+ const sameProject=previous?.project?.id===s.project?.id&&previous?.segment===s.segment;
+ if((automatic&&issue&&previous?.running&&sameProject)||(s.batch?.needs_attention&&!previous?.batch?.needs_attention))playPauseAlert();
+}
+for(const button of $('speed').querySelectorAll('button'))button.onclick=()=>{
+ playbackSpeed=Number(button.dataset.speed);
+ for(const option of $('speed').querySelectorAll('button'))option.setAttribute('aria-pressed',String(option===button));
+};
+const labels={uninitialized:'调整后开始',paused:'已暂停',running:'运行中',issue:'异常暂停',checkpoint:'已暂停，检查后继续',complete:'已处理'};
+function clock(t){const m=Math.floor(t/60);return String(m).padStart(2,'0')+':'+(t-m*60).toFixed(2).padStart(5,'0')}
+function message(t){$('feedback').textContent=t||''}
+function handles(p){return [Math.max(0,Math.min(canvas.width-1,p[0])),Math.max(7,Math.min(canvas.height-7,p[1]))]}
+function payload(){return {polygons:{...(partition?{partition:{...partition}}:{}),screen:state.record_exists&&state.polygons.screen.length!==1&&!screenDirty?structuredClone(state.polygons.screen):[structuredClone(points)],tablet:structuredClone(tablet)},visible:{...visible}}}
+function edge(a,b,x){return a[1]+(x-a[0])*(b[1]-a[1])/Math.max(2,b[0]-a[0])}
+function tabletOnFrame(p){return Math.min(...p.map(v=>v[1]))<canvas.height&&Math.max(...p.map(v=>v[1]))>0&&Math.min(...p.map(v=>v[0]))<canvas.width&&Math.max(...p.map(v=>v[0]))>0}
+function hiddenTabletHandle(p){return handles([p.reduce((sum,v)=>sum+v[0],0)/p.length,canvas.height])}
+function draw(){
+ if(paintPending)return;
+ paintPending=requestAnimationFrame(()=>{paintPending=0;drawNow()});
+}
+function lineInfo(){const x=(canvas.width-1)/2,y=edge(points[0],points.at(-1),x),slope=(points.at(-1)[1]-points[0][1])/(canvas.width-1);return {x,y,slope}}
+function setLine(y,slope){points=points.map(v=>[v[0],y+slope*(v[0]-(canvas.width-1)/2)])}
+function drawHorizontal(){
+ const {x,y,slope}=lineInfo(),a=points[0],b=points.at(-1),gap=partition.gap_px;
+ if(visible.screen){ctx.fillStyle='#a2e37022';ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(canvas.width,0);ctx.lineTo(...b);ctx.lineTo(...a);ctx.closePath();ctx.fill()}
+ if(visible.tablet){ctx.fillStyle='#68dbea22';ctx.beginPath();ctx.moveTo(a[0],a[1]+gap);ctx.lineTo(b[0],b[1]+gap);ctx.lineTo(canvas.width,canvas.height);ctx.lineTo(0,canvas.height);ctx.closePath();ctx.fill()}
+ ctx.strokeStyle='#a2e370';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();
+ ctx.strokeStyle='#68dbea';ctx.setLineDash([7,6]);ctx.beginPath();ctx.moveTo(a[0],a[1]+gap);ctx.lineTo(b[0],b[1]+gap);ctx.stroke();ctx.setLineDash([]);
+ if(!scrubContext&&!want&&!busy&&!state.batch?.active){
+  const gh=handles([x,y+gap]);ctx.beginPath();ctx.arc(...gh,7,0,Math.PI*2);ctx.fillStyle='#68dbea';ctx.fill();ctx.font='13px sans-serif';ctx.fillText('间隔 '+Math.round(gap)+'px',gh[0]+14,gh[1]+5);
+  for(const [hx,hy,label] of [[x,y,'上下移动'],[x+110,y+slope*110,'旋转']]){const pos=handles([hx,hy]);ctx.beginPath();ctx.arc(...pos,9,0,Math.PI*2);ctx.fillStyle='#a2e370';ctx.fill();ctx.font='13px sans-serif';ctx.fillText(label,pos[0]-20,pos[1]-17)}
+ }
+}
+function drawNow(){
+ if(!img)return;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ if(!points)return;const shown=scrubPreview||state;
+ if(partition){drawHorizontal();return}
+ ctx.save();
+ if(visible.tablet){ctx.beginPath();ctx.rect(0,0,canvas.width,canvas.height);for(const p of tablet){ctx.moveTo(...p[0]);p.slice(1).forEach(v=>ctx.lineTo(...v));ctx.closePath()}ctx.clip('evenodd')}
+ if(visible.screen&&shown.record_exists&&shown.polygons.screen.length!==1&&!screenDirty){
+  for(const p of shown.coverage){ctx.beginPath();p.forEach((v,i)=>i?ctx.lineTo(...v):ctx.moveTo(...v));ctx.closePath();ctx.fillStyle='#a2e37022';ctx.fill();ctx.beginPath();ctx.moveTo(...p[3]);ctx.lineTo(...p[2]);ctx.strokeStyle='#a2e370';ctx.lineWidth=3;ctx.stroke()}
+ }else if(visible.screen){
+  const left=[0,edge(points[0],points[1],0)],right=[canvas.width-1,edge(points[points.length-2],points[points.length-1],canvas.width-1)];
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(canvas.width-1,0);ctx.lineTo(...right);[...points].reverse().forEach(p=>ctx.lineTo(...p));ctx.lineTo(...left);ctx.closePath();ctx.fillStyle='#a2e37022';ctx.fill();
+  ctx.beginPath();ctx.moveTo(...left);points.forEach(p=>ctx.lineTo(...p));ctx.lineTo(...right);ctx.strokeStyle='#a2e370';ctx.lineWidth=3;ctx.stroke();
+ }
+ ctx.restore();
+ if(visible.tablet)for(const p of tablet){ctx.beginPath();p.forEach((v,i)=>i?ctx.lineTo(...v):ctx.moveTo(...v));ctx.closePath();ctx.fillStyle='#68dbea16';ctx.fill();ctx.strokeStyle='#68dbea';ctx.lineWidth=2;ctx.stroke()}
+ if(!scrubContext&&!want&&!busy&&!state.batch?.active){
+  for(const [key,list,color] of [['screen',[points],'#a2e370'],['tablet',tablet,'#68dbea']])if(visible[key])for(const poly of list)if(key!=='tablet'||tabletOnFrame(poly))poly.forEach(p=>{const v=handles(p);ctx.beginPath();ctx.arc(...v,7,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();ctx.strokeStyle='#101c12';ctx.lineWidth=2;ctx.stroke()});
+  if(visible.tablet)for(const p of tablet)if(!tabletOnFrame(p)){const h=hiddenTabletHandle(p);ctx.beginPath();ctx.arc(...h,6,0,Math.PI*2);ctx.fillStyle='#68dbea';ctx.fill();ctx.font='12px sans-serif';ctx.fillText('平板已隐藏 · 可拖回',Math.max(5,h[0]-65),h[1]-13)}
+ }
+}
+function controls(){
+ if(!state)return;const background=state.batch?.active||state.review?.status==='computing';const locked=busy||want||pausing||!!drag||background;
+ const ended=state.record_exists&&state.cursor===state.last&&!dirty;
+ const hasNext=state.slices.findIndex(s=>s.id===state.segment)<state.slices.length-1;
+ $('toggle').textContent=pausing?'正在暂停…':want?'暂停':ended?(hasNext?'下一切片':'已到最后一帧'):!state.record_exists?'开始':'继续';
+ $('toggle').disabled=!!drag||pausing||(!want&&busy)||(ended&&!hasNext);
+ $('toggle').classList.toggle('running',want);
+ $('status').textContent=pausing?'正在保存':dirty?'待保存':labels[state.mode]||state.mode;
+ for(const id of ['slice','seek','screenVisible','tabletVisible','openProject','reset','horizontalMode'])$(id).disabled=locked;
+ $('export').disabled=busy||pausing||!!drag||background||!!reviewUI;
+ if(state.batch?.active){$('toggle').textContent='暂停全部';$('toggle').disabled=pausing||busy;$('toggle').classList.add('running')}
+ if(reviewUI){$('slice').disabled=true;$('openProject').disabled=true;$('reset').disabled=true}
+ $('horizontalMode').disabled=locked||!!reviewUI;
+ $('manualHint').hidden=false;
+ if(!reviewUI)$('openProject').disabled=busy||pausing||!!drag||state.review?.status==='computing';
+ if(state.review?.status==='computing')$('toggle').disabled=true;
+ if(typeof workflowControls==='function')workflowControls();
+ if(typeof timingControls==='function')timingControls();
+ if(typeof imageControls==='function')imageControls();
+ if(scrubContext){for(const id of ['toggle','reset','export','slice','horizontalMode','screenVisible','tabletVisible','openProject','batchStart','batchSkip','reviewHead','reviewTail','reviewPlay','reviewSave'])$(id).disabled=true;$('status').textContent='拖动预览'}
+}
+async function render(s,automatic=false){
+ // Corrections and pause/continue often return the same frame. Keep its decoded
+ // image and canvas backing store; only the AOI overlay needs another paint.
+ if(!img||s.image!==imageSource){const next=new Image();next.src=s.image;await next.decode();img=next;imageSource=s.image}
+ showPauseAlert(state,s,automatic);
+ const recovery=s.polygons.partition?{enabled:true,message:'极简直线 · 屏幕上下边缘／横梁／平板辅助定位 · 暗光自动增强'}:s.smart_recovery||{};$('smartRecovery').hidden=!recovery.enabled&&!recovery.error;
+ showPreprocessing(s.preprocessing,recovery);
+ if(reviewUI&&(reviewUI.project!==s.project?.id||reviewUI.segment!==s.segment)){reviewUI=null;message('已切换片段，未保存的关键帧草稿已取消。')}
+ state=s;partition=s.polygons.partition?{...s.polygons.partition}:null;points=structuredClone(s.screen_points);tablet=structuredClone(s.polygons.tablet);visible={...s.visible};dirty=false;screenDirty=false;
+ if(canvas.width!==s.size[0])canvas.width=s.size[0];if(canvas.height!==s.size[1])canvas.height=s.size[1];
+ $('subject').textContent=(s.project?.label||'被试 '+s.subject)+(s.project?.kind==='复核副本'?' · 复核副本':'')+' · '+clock(s.start_s)+' — '+clock(s.end_s);$('clock').textContent=clock(s.time_s);
+ $('seek').min=s.first;$('seek').max=s.last;$('seek').value=s.cursor;
+ const slices=s.slices.map(x=>[x.id,Math.round(100*x.computed/x.total)]),nextSlices=JSON.stringify(slices);
+ if(nextSlices!==sliceMarkup){sliceMarkup=nextSlices;$('slice').replaceChildren(...slices.map(([id,percent])=>{const o=document.createElement('option');o.value=id;o.textContent='切片 '+id+' · '+percent+'%';return o}))}$('slice').value=s.segment;
+ canvas.setAttribute('aria-label',partition?'视频标注：单直线分区，中间拖动上下移动，右侧手柄旋转':'视频标注：绿色四个点为屏幕下边缘，青色四个点为平板');
+ $('horizontalMode').checked=!!s.horizontal_mode;
+ $('manualHint').textContent=partition?`极简分区：拖绿色中点上下移动，拖右侧手柄旋转；拖青色「间隔」手柄调宽窄（当前 ${Math.round(partition.gap_px)} 像素）。下方是平板近似区域，包含桌面和手。模糊会标红待复核。旧标注保持原样。`:'暂停后拖点或区域调整，屏幕左右端点贴边。松手自动保存；从这里重标会先备份。';
+ $('screenVisible').checked=visible.screen;$('tabletVisible').checked=visible.tablet;
+ const nextTimeline=JSON.stringify([s.first,s.last,s.spans]);
+ if(nextTimeline!==timelineMarkup){timelineMarkup=nextTimeline;$('timeline').replaceChildren(...s.spans.map(x=>{const e=document.createElement('span');e.style.left=100*(x.start-s.first)/(s.last-s.first+1)+'%';e.style.width=100*(x.end-x.start+1)/(s.last-s.first+1)+'%';e.style.background=progressColor(x.status);e.title=x.status==='issue'?'跟踪异常，点击定位':x.status==='unverified'?'起点待确认，点击定位':'已生成标注';e.setAttribute('role','button');e.tabIndex=0;e.setAttribute('aria-label',e.title+`（${x.start}–${x.end}帧）`);const open=()=>openTimelineSpan(x);e.onclick=open;e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open()}};return e}))}
+ $('reason').textContent=s.annotation_status==='unverified'?'黄色：沿用的起始轮廓尚未人工确认，不表示这一段持续失跟。可点击黄色段回看。':s.mode==='issue'?('⚠ 异常暂停：'+(s.reason||'请检查轮廓后继续。')):s.mode==='checkpoint'?(s.cursor===s.last?'本切片已处理，可切换下一段；保存情况见下方。':'已暂停检查。边缘正确就继续，有偏移直接拖动修正。'):s.mode==='uninitialized'?'先调整屏幕下缘和平板位置，然后开始。':s.mode==='running'?(s.reason||'正在标注，随时可暂停。'):'拖动进度条回看；修改会从当前帧局部重算。';
+ if(s.record_exists&&s.polygons.screen.length!==1)$('reason').textContent+=' 当前是旧轮廓，继续时转换为四点。';
+ if(s.inherited_from)$('reason').textContent=`已沿用切片 ${s.inherited_from} 最后保存的 AOI，检查后开始；有偏移可直接拖动修正。`;
+ if(typeof restoreReviewKey==='function')restoreReviewKey(s);
+ showSaved(s);controls();draw();
+}
+function showSaved(s){
+ const saved=s.saved||{},hasFiles=!!saved.archive_name&&saved.status!=='missing';
+ $('savedFiles').hidden=!hasFiles;
+ if(saved.status==='error')$('saveStatus').textContent=saved.error;
+ else if(saved.status==='saving')$('saveStatus').textContent='关键帧已保存，正在更新标注存档＋数据表…';
+ else if(saved.status==='saved')$('saveStatus').textContent=`已保存 ${new Date(saved.saved_at).toLocaleTimeString('zh-CN',{hour12:false})} · ${saved.frames} 帧 · 标注存档＋数据表`+(s.running?'（当前正在标注）':'');
+ else $('saveStatus').textContent=saved.status==='missing'?'保存文件缺失，请点击「保存标注」重新生成。':'尚未生成标注存档';
+ if(hasFiles){
+  $('saveFolder').textContent='本地位置：'+saved.folder;
+  const query='?project='+encodeURIComponent(s.project.id);
+  for(const [id,route,name] of [['reviewDownload','archive',saved.archive_name],['tableDownload','table',saved.csv_name]]){
+   if(saved.status!=='saved')$(id).removeAttribute('href');else $(id).href='/api/annotations/'+route+query;
+   $(id).setAttribute('aria-disabled',String(saved.status!=='saved'));$(id).style.opacity=saved.status!=='saved'?'.5':'';$(id).download=name;$(id).textContent=name;
+  }
+ }
+ scheduleSaveStatus();
+}
+let preprocessingState=null,preprocessingBusy=false;
+function showPreprocessing(preprocessing,recovery=state?.polygons?.partition?{enabled:true,message:'极简直线 · 屏幕上下边缘／横梁／平板辅助定位 · 暗光自动增强'}:state?.smart_recovery||{}){
+ preprocessingState=preprocessing;
+ const button=$('preprocessToggle'),status=preprocessing?.status;
+ button.hidden=!preprocessing?.enabled;
+ button.disabled=preprocessingBusy||['starting','pausing'].includes(status)||(status==='complete'&&preprocessing?.mode!=='line');
+ button.textContent=status==='starting'?'正在启动…':status==='pausing'?'正在暂停…':status==='complete'?(preprocessing?.mode==='line'?'更新预处理':'预处理已完成'):status==='running'?'暂停预处理':'继续预处理';
+ let text=recovery.message||'';
+ if(preprocessing?.enabled){
+  const p=preprocessing;
+  text+=' · '+(p.status==='running'?`预处理中：${p.subject}号 ${p.segment}`:p.status==='pausing'?'正在暂停预处理，保留已完成进度':p.status==='starting'?'正在继续预处理':p.status==='complete'?'剩余视频预处理完成':p.status==='error'?'预处理已停止：'+p.error:p.status==='paused'?'预处理已暂停，已准备的缓存可用':'特征缓存已启用');
+  if(p.mode==='line'){
+   const percent=Number.isFinite(p.position_s)&&p.job_end>p.job_start?Math.max(0,Math.min(100,Math.round(100*(p.position_s-p.job_start)/(p.job_end-p.job_start)))):null;
+   const progress=percent===null?'':` · 当前段 ${percent}%`;
+   const completed=Number.isFinite(p.completed_jobs)?` · 已准备 ${p.completed_jobs}/${p.segments} 段`:'';
+   text=(recovery.message||'')+' · 直线预处理：'+(p.status==='running'?`${p.subject}号 ${p.segment}${progress}${completed}`:p.status==='complete'?'当前及下一份录像已准备，切换后自动补齐':p.status==='space_paused'?p.error:p.status==='error'?p.error:p.status==='starting'?'正在启动':p.status==='pausing'?'正在暂停':'已暂停，已有缓存可用');
+   text+=` · 缓存 ${(Number(p.cache_bytes||0)/1024**3).toFixed(2)} / ${p.max_gb} GB · 识别已复用 ${p.hits||0} 次`;
+  }
+  $('smartRecovery').hidden=false;
+ }
+ $('smartRecovery').textContent=text;
+}
+$('preprocessToggle').onclick=async()=>{
+ if(preprocessingBusy)return;
+ const action=preprocessingState?.status==='running'?'pause':'resume';
+ preprocessingBusy=true;showPreprocessing(preprocessingState);
+ try{
+  const response=await fetch('/api/preprocess-control',{method:'POST',headers:{'Content-Type':'application/json','X-AOI-Client':'1'},body:JSON.stringify({action})});
+  const result=await response.json();if(!response.ok)throw new Error(result.error||'预处理操作失败');
+  showPreprocessing(result);
+ }catch(error){$('feedback').textContent=error.message}
+ finally{preprocessingBusy=false;showPreprocessing(preprocessingState)}
+};
+function scheduleSaveStatus(){
+ if(savePollTimer||savePollBusy||state?.saved?.status!=='saving')return;
+ savePollTimer=setTimeout(pollSaveStatus,1000);
+}
+async function pollSaveStatus(){
+ savePollTimer=null;if(savePollBusy||state?.saved?.status!=='saving')return;
+ const project=state.project?.id,pendingSave=state.saved;savePollBusy=true;
+ try{
+  const response=await fetch('/api/save-status?project='+encodeURIComponent(project)),result=await response.json();
+  // This response contains no geometry: an in-progress drag must remain local.
+  if(response.ok&&state.project?.id===project&&state.saved===pendingSave&&result.project_id===project){state.saved=result.saved;showSaved(state)}
+ }catch(_){}finally{savePollBusy=false;scheduleSaveStatus()}
+}
+function request(action,data={}){
+ const task=async()=>{stopScrub();busy=true;controls();try{
+  const r=await fetch('/api/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-AOI-Client':'1'},body:JSON.stringify({...data,revision:state.revision})});
+  const s=await r.json();if(!r.ok){if(s.state?.image)await render(s.state,action==='step');throw Error(s.error||'操作失败')}
+  await render(s,action==='step');if(s.notice)message(s.notice);return s;
+ }finally{busy=false;controls();draw()}};
+ const p=serial.then(task,task);serial=p.catch(()=>{});return p;
+}
+async function safe(action,data){try{return await request(action,data)}catch(e){want=false;message(e.message);controls();draw();return null}}
+async function save(){if(reviewUI){const edited=dirty;captureReviewKey();if(edited&&state.review?.status==='ready')await safe('review_cancel');dirty=false;return true}if(!dirty)return true;const data=payload();return !!await safe('correct',data)}
+async function pause(){
+ want=false;epoch++;pausing=true;controls();
+ // Signal the server immediately, even while a multi-frame step is in flight.
+ // The normal serialized pause below still owns the revision/state update.
+ fetch('/api/pause-request',{method:'POST',headers:{'Content-Type':'application/json','X-AOI-Client':'1'},body:JSON.stringify({project_id:state?.project?.id,token:state?.token})}).catch(()=>{});
+ await safe('pause');pausing=false;controls();draw();
+}
+async function go(index){if(!await save())return;if(want||state.running)await pause();await safe('seek',{index:Math.max(state.first,Math.min(state.last,index))})}
+async function play(){
+ if(busy||want)return;
+ if(reviewUI){if(!await save()||!await detachKeyframePreview())return;}
+ unlockAlertAudio();message('');
+ if(state.cursor===state.last&&state.record_exists&&!dirty){const i=state.slices.findIndex(x=>x.id===state.segment);if(i+1<state.slices.length)await safe('select',{segment:state.slices[i+1].id});return}
+ const data=dirty||!state.record_exists?payload():{};
+ const mine=++epoch;want=true;controls();draw();
+ if(!await safe('continue',data)||mine!==epoch){want=false;controls();return}
+ while(want&&mine===epoch){
+  const start=performance.now(),before=state.time_s,speed=playbackSpeed;
+  const frames=({1:1,1.5:3,2:4,3:6,5:10})[speed]||1;
+  const s=await safe('step',{token:state.token,frames});if(!s||!s.running)break;
+  await new Promise(r=>setTimeout(r,Math.max(0,1000*(s.time_s-before)/speed-(performance.now()-start))));
+ }
+ if(mine===epoch){want=false;controls();draw()}
+}
+$('toggle').onclick=()=>state?.batch?.active||want?pause():play();
+$('horizontalMode').onchange=async()=>{if(!await save())return;await safe('partition',{enabled:$('horizontalMode').checked})};
+$('reset').onclick=async()=>{
+ if(busy||want||pausing||drag)return;
+ unlockAlertAudio();const data=payload();message('');
+ if(await safe('reset',data)){message('已备份旧标注，从当前帧重新计算。');if(state.cursor<state.last)await play()}
+};
+$('slice').onchange=async()=>{const segment=$('slice').value;if(!await save())return;await pause();await safe('select',{segment})};
+const scrubber=AOIScrub.create({
+ load:async item=>{
+  const query=new URLSearchParams(item),response=await fetch('/api/preview?'+query);
+  const result=await response.json();if(!response.ok)throw Error(result.error||'预览暂不可用');return result;
+ },
+ show:async(s,isCurrent)=>{
+  const next=new Image();next.src=s.image;await next.decode();
+  if(!isCurrent()||!scrubContext||s.project_id!==scrubContext.project||s.segment!==scrubContext.segment||s.revision!==scrubContext.revision)return;
+  document.body.classList.toggle('issue-alert',s.problems.some(p=>p!=='起始轮廓待确认'));document.title='拖动预览 · AOI 切片标注';
+  img=next;imageSource=s.image;scrubPreview=s;points=s.screen_points?structuredClone(s.screen_points):null;
+  tablet=s.polygons?structuredClone(s.polygons.tablet):[];partition=s.polygons?.partition?{...s.polygons.partition}:null;visible={...s.visible};
+  $('clock').textContent=clock(s.time_s)+' · 拖动预览';
+  $('reason').textContent=!s.record_exists?'此处未标注，仅预览视频画面':s.preview?'复核草稿预览（尚未保存）':s.problems.length?'已标注 · 待复核：'+s.problems.join('；'):'已标注 · 拖动预览，松手停在此处';
+  draw();
+ },
+ error:e=>{$('reason').textContent=e.message+'；松手后定位。'}
+});
+function stopScrub(){scrubber.cancel();scrubContext=null;scrubPreview=null}
+$('seek').oninput=()=>{
+ if(!state||busy||want||pausing||dirty||state.batch?.active||state.review?.status==='computing')return;
+ if(!scrubContext){scrubContext={project:state.project?.id||'',segment:state.segment,revision:state.revision};controls()}
+ $('status').textContent='拖动预览';scrubber.push({...scrubContext,index:Number($('seek').value)});
+};
+$('seek').onchange=()=>{const index=Number($('seek').value);stopScrub();go(index)};
+$('seek').onpointercancel=async()=>{stopScrub();await render(state)};
+$('seek').onpointerup=()=>setTimeout(()=>{if(scrubContext){const index=Number($('seek').value);stopScrub();go(index)}},0);
+$('seek').onblur=()=>{if(scrubContext){const index=Number($('seek').value);stopScrub();go(index)}};
+
+$('export').onclick=async()=>{
+ const data=dirty?payload():{};want=false;epoch++;pausing=true;message('');controls();
+ try{await safe('save',data)}finally{pausing=false;controls();draw()}
+};
+for(const [id,key] of [['screenVisible','screen'],['tabletVisible','tablet']])$(id).onchange=async()=>{visible[key]=$(id).checked;dirty=true;draw();await save()};
+function point(e){const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*canvas.width/r.width,(e.clientY-r.top)*canvas.height/r.height]}
+function hit(p){
+ if((typeof timingDraft!=='undefined'&&timingDraft)||!state||scrubContext||want||busy||state.batch?.active||state.review?.status==='computing')return null;
+ if(partition){const {x,y,slope}=lineInfo(),h=handles([x+110,y+slope*110]),g=handles([x,y+partition.gap_px]);return {kind:Math.hypot(p[0]-h[0],p[1]-h[1])<20?'rotate':Math.hypot(p[0]-g[0],p[1]-g[1])<12?'gap':'line',key:'screen'}}
+ let best=18,result=null;
+ if(visible.tablet)for(let pi=0;pi<tablet.length;pi++)if(!tabletOnFrame(tablet[pi])){const h=hiddenTabletHandle(tablet[pi]);if(Math.hypot(p[0]-h[0],p[1]-h[1])<best)return {kind:'area',key:'tablet',pi}}
+ for(const [key,list] of [['screen',[points]],['tablet',tablet]])if(visible[key])list.forEach((poly,pi)=>{if(key==='tablet'&&!tabletOnFrame(poly))return;poly.forEach((v,vi)=>{const h=handles(v),d=Math.hypot(p[0]-h[0],p[1]-h[1]);if(d<best){best=d;result={kind:'point',key,pi,vi}}})});
+ if(result)return result;
+ if(visible.tablet)for(let pi=tablet.length-1;pi>=0;pi--)if(AOIDrag.inside(p,tablet[pi]))return {kind:'area',key:'tablet',pi};
+ const coverage=state.record_exists&&state.polygons.screen.length!==1&&!screenDirty?state.coverage:[[[0,0],[canvas.width-1,0],...points.toReversed()]];
+ if(visible.screen&&coverage.some(poly=>AOIDrag.inside(p,poly)))return {kind:'area',key:'screen',pi:0};
+ return null;
+}
+function cursor(target){canvas.style.cursor=!target?'default':target.kind==='area'?'grab':target.key==='screen'&&(target.vi===0||target.vi===points.length-1)?'ns-resize':'move'}
+canvas.onpointerdown=e=>{
+ if(e.button!==0||drag)return;const p=point(e),target=hit(p);if(!target)return;
+ drag={...target,id:e.pointerId,start:p,points:structuredClone(points),tablet:structuredClone(tablet),partition:partition?{...partition}:null,dirty,screenDirty};
+ canvas.setPointerCapture(e.pointerId);canvas.style.cursor=target.kind==='area'?'grabbing':'move';controls();e.preventDefault();
+};
+function moveDrag(e){
+ const p=point(e);if(!drag){cursor(hit(p));return}if(e.pointerId!==drag.id)return;
+ if(p[0]===drag.start[0]&&p[1]===drag.start[1]&&!dirty)return;
+ if(drag.kind==='gap'){partition.gap_px=Math.max(0,Math.min(canvas.height/2,drag.partition.gap_px+p[1]-drag.start[1]));}
+ else if(drag.kind==='line'){points=drag.points.map(v=>[v[0],v[1]+p[1]-drag.start[1]]);}
+ else if(drag.kind==='rotate'){const x=(canvas.width-1)/2,y=edge(drag.points[0],drag.points.at(-1),x);setLine(y,Math.max(-1.5,Math.min(1.5,(p[1]-y)/Math.max(30,p[0]-x))));}
+ else if(drag.kind==='area'){
+  const original=drag.key==='screen'?drag.points:drag.tablet[drag.pi];
+  const moved=AOIDrag.translate(original,[p[0]-drag.start[0],p[1]-drag.start[1]],[canvas.width,canvas.height],drag.key==='screen');
+  if(drag.key==='screen')points=moved;else tablet[drag.pi]=moved;
+ }else{
+  p[0]=Math.max(0,Math.min(canvas.width-1,p[0]));p[1]=Math.max(1,Math.min(canvas.height-1,p[1]));
+  if(drag.key==='screen'){const i=drag.vi;p[0]=i===0?0:i===points.length-1?canvas.width-1:Math.max(points[i-1][0]+3,Math.min(points[i+1][0]-3,p[0]));points[i]=p}else tablet[drag.pi][drag.vi]=p;
+ }
+ if(drag.key==='screen')screenDirty=true;if(!dirty)$('status').textContent='待保存';dirty=true;draw();
+}
+canvas.onpointermove=moveDrag;
+canvas.onpointerup=async e=>{if(!drag||e.pointerId!==drag.id)return;moveDrag(e);drag=null;canvas.style.cursor='default';controls();await save()};
+canvas.onpointercancel=e=>{if(!drag||e.pointerId!==drag.id)return;points=drag.points;tablet=drag.tablet;partition=drag.partition;dirty=drag.dirty;screenDirty=drag.screenDirty;drag=null;canvas.style.cursor='default';controls();draw()};
+document.addEventListener('keydown',e=>{if(scrubContext||(typeof timingDraft!=='undefined'&&timingDraft))return;if($('projectDialog').open||drag||e.target.closest('#speed')||['INPUT','SELECT'].includes(e.target.tagName))return;if(e.code==='Space'){e.preventDefault();if(want||state?.batch?.active)pause();else if(!$('toggle').disabled)play()}if(!want&&!busy&&e.key==='ArrowLeft'){e.preventDefault();go(state.cursor-1)}if(!want&&!busy&&e.key==='ArrowRight'){e.preventDefault();go(state.cursor+1)}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&!state?.batch?.active&&(want||state?.running))pause()});
+window.addEventListener('beforeunload',e=>{want=false;epoch++;if(state&&!state.batch?.active)fetch('/api/pause',{method:'POST',headers:{'Content-Type':'application/json','X-AOI-Client':'1'},body:'{}',keepalive:true}).catch(()=>{});if(dirty){e.preventDefault();e.returnValue=''}});
+(async()=>{try{const r=await fetch('/api/state');const s=await r.json();if(!r.ok)throw Error(s.error);await render(s);if(!s.batch?.active)await safe('pause')}catch(e){message('连接失败：'+e.message)}})();
+setInterval(async()=>{if(!state)return;try{const r=await fetch('/api/preprocess-status');if(r.ok)showPreprocessing(await r.json())}catch(_){}},5000);
+</script><script src="/aoi_projects.js"></script><script src="/aoi_workflow.js"></script><script src="/aoi_directory.js"></script><script src="/aoi_slice_timing.js"></script><script src="/aoi_image_adjustments.js"></script></body></html>
